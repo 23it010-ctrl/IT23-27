@@ -279,6 +279,7 @@ button{font-family:inherit}
 </div>
 
 <div id="ctrl"><button id="pauseBtn" title="Pause / Play">⏸</button><button id="muteBtn" title="Mute">🔊</button></div>
+<audio id="bgm" preload="auto" src="./Yaarenna-Sonnalum-MassTamilan.fm.mp3"></audio>
 <div id="toast"></div>
 
 <script>
@@ -317,7 +318,8 @@ const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 const lerp = (a, b, t) => a + (b - a) * t;
 const Y = CONFIG.years;
 
-let paused = false, muted = false, fb = 0, last = 0, running = false;
+const audio = $('#bgm');
+let audioOK = false, paused = false, muted = false, fb = 0, last = 0, running = false;
 let U = 10, L = 2000, Xf = 340;
 let curYear = -1, galleryOpen = false, focusK = -1, slideIndex = -1, rdyTimer = null;
 let credH = 0, credIH = 0;
@@ -701,9 +703,9 @@ function updateSound(t, dt) {
 /* ---------- main loop ---------- */
 function loop(now) {
   const dt = Math.min(.1, (now - last) / 1000); last = now;
-  if (!paused) fb += dt;
-  const T = Math.max(40, CONFIG.journeySec);
-  const t = fb;
+  if (!audioOK && !paused) fb += dt;
+  const T = Math.max(40, audioOK && Number.isFinite(audio.duration) ? audio.duration : CONFIG.journeySec);
+  const t = audioOK ? audio.currentTime : fb;
   const LS = CONFIG.loaderSec;
 
   $('#loader').classList.toggle('on', t < LS);
@@ -720,23 +722,57 @@ function loop(now) {
 
 /* ---------- controls ---------- */
 function toast(msg) { const el = $('#toast'); el.textContent = msg; el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 5200); }
-function isPaused() { return paused; }
+function isPaused() { return audioOK ? audio.paused : paused; }
 function updBtn() { $('#pauseBtn').textContent = isPaused() ? '▶' : '⏸'; }
 function togglePause() {
-  paused = !paused;
+  if (audioOK) {
+    if (audio.paused) {
+      audio.play().catch(() => {
+        audioOK = false;
+        paused = false;
+        toast('Song play aagala — journey silent mode-la continue aagum.');
+      });
+    } else {
+      audio.pause();
+    }
+  } else {
+    paused = !paused;
+  }
   updBtn();
 }
+audio.addEventListener('play', updBtn);
+audio.addEventListener('pause', updBtn);
+audio.addEventListener('error', () => {
+  if (!audioOK) return;
+  fb = Number.isFinite(audio.currentTime) ? audio.currentTime : fb;
+  audioOK = false;
+  paused = false;
+  toast('Song playback stopped — journey silent mode-la continue aagum.');
+  updBtn();
+});
 $('#pauseBtn').onclick = togglePause;
-$('#muteBtn').onclick = () => { muted = !muted; $('#muteBtn').textContent = muted ? '🔇' : '🔊'; };
+$('#muteBtn').onclick = () => {
+  muted = !muted;
+  audio.muted = muted;
+  $('#muteBtn').textContent = muted ? '🔇' : '🔊';
+};
 addEventListener('keydown', e => { if (e.code === 'Space' && running) { e.preventDefault(); togglePause(); } });
 
-function begin() {
+async function begin() {
   if (running) return;
   running = true;
   $('#gate').classList.remove('on');
   $('#ctrl').classList.add('on');
   fb = 0;
   paused = false;
+  try {
+    audio.currentTime = 0;
+    await audio.play();
+    audioOK = true;
+  } catch (err) {
+    audioOK = false;
+    toast('Song load aagala — journey silent mode-la continue aagum.');
+  }
   updBtn();
   last = performance.now();
   requestAnimationFrame(loop);
@@ -753,6 +789,14 @@ $('#slideFullscreen').onclick = async () => {
 
 $('#replay').onclick = () => {
   fb = 0; paused = false; curYear = -1; galleryOpen = false; fired.clear(); clackPhase = 0;
+  audio.currentTime = 0;
+  if (audioOK) {
+    audio.play().catch(() => {
+      audioOK = false;
+      paused = false;
+      toast('Song play aagala — journey silent mode-la continue aagum.');
+    });
+  }
   updBtn();
   $('#gallery').classList.remove('open');
   $('#end').classList.remove('on');
